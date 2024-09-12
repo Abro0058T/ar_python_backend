@@ -2,3 +2,4 @@ Flask==3.0.3
 numpy==2.1.1
 opencv_python==4.10.0.84
 opencv_python_headless==4.10.0.84
+ultralytics==8.2.92
