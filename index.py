@@ -18,7 +18,7 @@ model = YOLO("best.pt")
 
 @app.route("/wall", methods=["POST"])
 @cross_origin()
-def detect_lines_and_measure(image_path="./blueprint4.png"):
+def detect_lines_and_measure(image_path="./test2.png"):
     # response.headers.add("Access-Control-Allow-Origin", "*")
     # if request.method == "POST":
     #     f = request.files["file"]
