@@ -18,7 +18,11 @@ model = YOLO("best.pt")
 
 @app.route("/wall", methods=["POST"])
 @cross_origin()
-def detect_lines_and_measure(image_path="./test2.png"):
+def detect_lines_and_measure  (image_path="./test2.png"):
+    #(image_path="./test.png"):
+    #(image_path="./test3.png"):
+
+
     # response.headers.add("Access-Control-Allow-Origin", "*")
     # if request.method == "POST":
     #     f = request.files["file"]
@@ -98,16 +102,16 @@ def detect_lines_and_measure(image_path="./test2.png"):
 @app.route("/", methods=["POST"])
 @cross_origin()
 def detect_furniture(image_path="./blueprint4.png"):
-    # if request.method == "POST":
-    #     f = request.files["file"]
-    #     f.save(f.filename)
+    if request.method == "POST":
+        f = request.files["file"]
+        f.save(f.filename)
 
-    # image = cv2.imread(f.filename)
-    # if image is None:
-    #     raise ValueError("Image not found or unable to load.")
-    # print(image)
-    # results = model.predict(f.filename)
-    results = model.predict(image_path)
+    image = cv2.imread(f.filename)
+    if image is None:
+        raise ValueError("Image not found or unable to load.")
+    print(image)
+    results = model.predict(f.filename)
+    # results = model.predict(image_path)
     # print(len(results[0].boxes))
     furnitureCoordinate = []
 
