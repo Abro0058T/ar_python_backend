@@ -1,0 +1,7 @@
+
+venv/
+*.jpg
+*.jpeg
+test_*_visual.jpg
+original_walls.jpg
+merged_walls.jpg
