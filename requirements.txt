@@ -3,3 +3,7 @@ numpy==1.23.5
 opencv_python==4.10.0.84 
 opencv_python_headless==4.10.0.84
 ultralytics==8.2.92
+python-dotenv==1.0.0
+Pillow==10.0.0
+requests==2.31.0
+flask-cors==5.0.1

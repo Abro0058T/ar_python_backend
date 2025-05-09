@@ -8,8 +8,21 @@ from distutils.log import debug
 from fileinput import filename
 from ultralytics import YOLO
 
+import os
+from werkzeug.utils import secure_filename
+import time
+
 app = Flask(__name__)
 CORS(app, resources={r"*": {"origins": "http://localhost:5173"}}, methods=["GET", "POST"], allow_headers=["Content-Type"])
+
+# Configure file uploads
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
+app.config['UPLOAD_FOLDER'] = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # app.config["CORS_HEADERS"] = 'Content-Type'
 # app.run(use_reloader=False)
@@ -79,7 +92,7 @@ def visualize_merged_lines(original_lines, merged_lines, merge_map=None, filenam
 
 
 # parameters - (degrees , pixels)
-def merge_similar_walls(lines, angle_threshold=10, distance_threshold=40):
+def merge_similar_walls(lines, angle_threshold=10, distance_threshold=30):
     """
     Merge similar wall lines that likely represent the same wall.
     
@@ -237,7 +250,7 @@ def merge_similar_walls(lines, angle_threshold=10, distance_threshold=40):
                 
             if lines_are_close_and_parallel(current_line, lines[j]):
                 # Print merging information for debugging
-                print(f"Merging line {i}: {current_line} with line {j}: {lines[j]}")
+                # print(f"Merging line {i}: {current_line} with line {j}: {lines[j]}")
                 current_line = merge_lines_with_consistent_dimensions(current_line, lines[j])
                 merged_line_indices.append(j)
                 merged[j] = True
@@ -252,125 +265,147 @@ def merge_similar_walls(lines, angle_threshold=10, distance_threshold=40):
     # Create a visualization of the merging process
     visualize_merged_lines(original_lines, result, merge_map, 'wall_merging_visual.jpg')
     
-    print(f"Original lines: {len(lines)}, Merged lines: {len(result)}")
+    # print(f"Original lines: {len(lines)}, Merged lines: {len(result)}")
     print(f"Merge mapping: {merge_map}")
     
     return result
 
+def cleanup_old_files(directory, days_old=10):
+    """Delete files older than the specified number of days"""
+    now = time.time()
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if os.path.isfile(file_path) and os.stat(file_path).st_mtime < now - days_old * 86400:
+            os.remove(file_path)
+
 
 @app.route("/wall", methods=["POST"])
 @cross_origin()
-def detect_lines_and_measure  (image_path="./test3.png"):
-    #(image_path="./test.png"):
-    #(image_path="./test3.png"):
-
-
-    # response.headers.add("Access-Control-Allow-Origin", "*")
-    # if request.method == "POST":
-    #     f = request.files["file"]
-    #     f.save(f.filename)
-
-    # image = cv2.imread(f.filename)
-    image = cv2.imread(image_path)
-    if image is None:
-        raise ValueError("Image not found or unable to load.")
+def detect_lines_and_measure():
+    image = None
+    file_path = None
     
-    # results = model.predict(image_path)
-    results= model(image)
-    # print(len(results[0].boxes))
+    if request.method == "POST" and 'file' in request.files:
+        # Get the uploaded file
+        uploaded_file = request.files['file']
+        
+        print(f"File upload request received: {uploaded_file.filename}")
+        
+        # Check if the file is empty
+        if uploaded_file.filename == '':
+            print("Empty filename received, using default image")
+            image_path = "./test3.png"
+            image = cv2.imread(image_path)
+            if image is None:
+                return jsonify({"error": "Default image not found"})
+        # Check if the file has an allowed extension
+        elif not allowed_file(uploaded_file.filename):
+            print(f"Invalid file type: {uploaded_file.filename}")
+            return jsonify({'error': 'File type not allowed'})
+        else:
+            # Save the file with a secure filename
+            filename = secure_filename(uploaded_file.filename)
+            file_path = os.path.join('uploads', filename)
+            
+            # Create uploads directory if it doesn't exist
+            os.makedirs('uploads', exist_ok=True)
+            
+            # Save the file
+            uploaded_file.save(file_path)
+            print(f"File saved successfully to: {file_path}")
+            
+            # Process the uploaded image
+            image = cv2.imread(file_path)
+            if image is None:
+                print(f"Failed to load image from: {file_path}")
+                return jsonify({"error": "Unable to load the uploaded image"})
+    else:
+        # No file was uploaded, use default image
+        print("No file uploaded, using default image")
+        image_path = "./test3.png"
+        image = cv2.imread(image_path)
+        if image is None:
+            return jsonify({"error": "Default image not found"})
+    
+    # Rest of your code remains the same, but let's remove unnecessary prints
+    results = model(image)
     furnitureCoordinate = []
 
     for furni in results[0].boxes:
-        # return f"{furni}"
-        print(f"{furni.xyxy} this is furni")
+        # Remove unnecessary print
+        # print(f"{furni.xyxy} this is furni")
         furnitureCoordinate.append({
-            "coordinate" : [int(np.array(furni.xyxy)[0][0]),int(np.array(furni.xyxy)[0][1]),int(np.array(furni.xyxy)[0][2]),int(np.array(furni.xyxy)[0][3])],
+            "coordinate": [int(np.array(furni.xyxy)[0][0]), int(np.array(furni.xyxy)[0][1]), 
+                         int(np.array(furni.xyxy)[0][2]), int(np.array(furni.xyxy)[0][3])],
             "name": int(np.array(furni.cls)[0])
         })
-    furniture = {
-        "furnitureCount": len(results[0].boxes),
-        "furnitureCoordinate": furnitureCoordinate
-    }
-
-    # Get the results
-    boxes = results[0].boxes.xyxy  # Bounding boxes in (x1, y1, x2, y2) format
-    confidences = results[0].boxes.conf  # Confidence scores
-    labels = results[0].boxes.cls  # Class labels
-
-    # Class names (COCO dataset example)
-    # class_names = model.names
+    
+    # Get bounding boxes, confidences, labels
+    boxes = results[0].boxes.xyxy
+    confidences = results[0].boxes.conf
+    labels = results[0].boxes.cls
 
     # Draw bounding boxes on the image
     for box, confidence, label in zip(boxes, confidences, labels):
         x1, y1, x2, y2 = map(int, box)
-        # class_name = class_names[int(label)]
-        color = (255, 255, 255)  # Color for bounding box (green)
-
-        # Draw the bounding box
+        color = (255, 255, 255)
         cv2.rectangle(image, (x1+10, y1+10), (x2-10, y2-10), color, -1)
 
-        # Add label and confidence score
-        # text = f"{class_name} {confidence:.2f}"
-        # cv2.putText(image, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-
-    # walls 
+    # Process walls
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
     edges = cv2.Canny(blurred, 30, 30)
-
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 70, minLineLength=2, maxLineGap=1)
 
     if lines is None:
-        print("No lines detected.")
-        return jsonify({"error": "No lines detected", "furniture": furnitureCoordinate})  
+        print("No lines detected in the image.")
+        return jsonify({"error": "No lines detected", "furniture": furnitureCoordinate})
     
-    print("=== Hough Lines Transform Output ===")
-    print(f"Detected {len(lines)} lines")
+    print(f"Detected {len(lines)} lines in the image")
 
     line_image = np.copy(image)
     linesCo = []
     
     for i, line in enumerate(lines):
-        print(f"Line {i}: {line[0]}")
+        # Remove line coordinate print
+        # print(f"Line {i}: {line[0]}")
         x1, y1, x2, y2 = line[0]
         cv2.line(line_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
         length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
         linesCo.append([int(x1), int(y1), int(x2), int(y2), int(length)])
 
-    # Apply the wall merging algorithm (degrees, pixels)
+    # Modify merge_similar_walls to remove debugging print statements
+    # We'll keep just the summary statistic
     merged_walls = merge_similar_walls(linesCo, angle_threshold=10, distance_threshold=30)
     
-    # Create visualization of original vs merged walls
-    merged_image = np.copy(image)
-        # Create a detailed visualization showing the merging process
+    # Create visualization
     merging_visual = np.copy(image)
     
-    # Draw original lines with numbers
+    # Draw original and merged lines
     for i, line in enumerate(linesCo):
         x1, y1, x2, y2, _ = line
-        cv2.line(merging_visual, (x1, y1), (x2, y2), (255, 200, 0), 1)  # Orange
-        cv2.putText(merging_visual, str(i), (x1 - 10, y1 - 5), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        cv2.line(merging_visual, (x1, y1), (x2, y2), (255, 200, 0), 1)
     
-    # Draw merged lines with thicker red lines
     for i, wall in enumerate(merged_walls):
         x1, y1, x2, y2, _ = wall
-        cv2.line(merging_visual, (x1, y1), (x2, y2), (0, 0, 255), 2)  # Red
-        # Label with M for merged
+        cv2.line(merging_visual, (x1, y1), (x2, y2), (0, 0, 255), 2)
         mid_x = (x1 + x2) // 2
         mid_y = (y1 + y2) // 2
         cv2.putText(merging_visual, f"M{i}", (mid_x + 5, mid_y + 5), 
                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
     
-    # Save this detailed visualization
+    # Save visualization
     cv2.imwrite('wall_merging_details.jpg', merging_visual)
     
+    # Clean up old files
+    if file_path and os.path.exists(file_path):
+        print(f"Processing completed for: {file_path}")
+    cleanup_old_files('uploads')
+    
+    # Final result
     finalResult = {"wall": merged_walls, "furniture": furnitureCoordinate}
-    print(f"Original walls: {len(linesCo)}, Merged walls: {len(merged_walls)}")
+    # print(f"Results: {len(linesCo)} original walls merged to {len(merged_walls)} walls")
+    
     return json.dumps(finalResult)
 
 
